@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Contador de Personas 3D</title>
+    <title>Control de Aforo 3D</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Three.js CDN (Versión r128) -->
@@ -12,15 +12,39 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <style>
         /* Estilos personalizados para asegurar que el lienzo 3D ocupe la pantalla */
+        body { margin: 0; font-family: 'Inter', sans-serif; }
         #scene-container {
-            position: relative;
+            position: fixed;
+            top: 0;
+            left: 0;
             width: 100vw;
             height: 100vh;
             overflow: hidden;
-            background-color: #111122; 
+            /* Fondo más oscuro, simulando el techo y las paredes lejanas */
+            background: linear-gradient(135deg, #020210 0%, #1a1a33 50%, #05051e 100%); 
         }
         canvas {
             display: block;
+        }
+        /* Clase para el scrollbar de la lista de personas, estilo oscuro de club */
+        .club-scrollbar::-webkit-scrollbar {
+            width: 8px;
+        }
+        .club-scrollbar::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+        }
+        .club-scrollbar::-webkit-scrollbar-thumb {
+            background: #4A3E99; /* Morado/Azul */
+            border-radius: 10px;
+        }
+        .club-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #6D5EAB;
+        }
+
+        /* Sombra de texto para el neón */
+        .text-shadow-lg {
+            text-shadow: 0 0 5px currentColor, 0 0 10px currentColor;
         }
     </style>
     <script>
@@ -31,790 +55,1168 @@
                     fontFamily: {
                         sans: ['Inter', 'sans-serif'],
                     },
+                    colors: {
+                        'primary-neon': '#7E57FF', // Púrpura brillante (HOMBRE)
+                        'secondary-neon': '#FF57A6', // Rosa brillante (MUJER)
+                        'danger-neon': '#FF4D4D', // Rojo brillante
+                        'male-color': '#7E57FF',
+                        'female-color': '#FF57A6',
+                    }
                 }
             }
         }
     </script>
 </head>
-<body class="font-sans antialiased">
+<body>
+    <!-- Contenedor 3D -->
+    <div id="scene-container"></div>
 
-    <div id="scene-container">
-        <!-- El canvas de Three.js se insertará aquí -->
-        
-        <!-- Controles de la Interfaz de Usuario -->
-        <div id="controls" class="absolute top-4 left-1/2 transform -translate-x-1/2 p-4 bg-white bg-opacity-90 rounded-xl shadow-2xl z-10 w-11/12 max-w-2xl flex flex-wrap justify-center space-x-2 space-y-2 sm:space-y-0 border border-gray-100">
-            <button id="addMan" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 shadow-md active:shadow-inner min-w-[120px]">
-                Añadir Hombre
+    <!-- Panel de Control (Overlay de la UI) -->
+    <div class="fixed top-0 right-0 h-full w-full md:w-96 bg-black bg-opacity-70 backdrop-blur-sm p-4 text-white z-10 overflow-y-auto club-scrollbar">
+        <h1 class="text-3xl font-extrabold mb-2 text-primary-neon text-shadow-lg">Aforo: Club Insight</h1>
+        <p class="text-sm mb-4 text-gray-300">Monitoreo en tiempo real del flujo de asistentes.</p>
+
+        <!-- Aforo Actual y Barra de Progreso -->
+        <div class="bg-gray-800 p-4 rounded-xl shadow-lg border border-primary-neon/30 mb-6">
+            <div class="flex justify-between items-baseline mb-2">
+                <span class="text-xl font-bold text-white">Personas en Club:</span>
+                <span id="currentCount" class="text-4xl font-extrabold text-secondary-neon">0</span>
+            </div>
+            
+            <!-- Indicador de Aforo Máximo -->
+            <div class="mb-3">
+                <label for="maxCapacity" class="block text-sm font-medium text-gray-400">Capacidad Máxima (Aforo)</label>
+                <input type="number" id="maxCapacity" value="100" min="1" class="mt-1 block w-full rounded-lg border-gray-600 bg-gray-700 text-white p-2 text-center transition duration-150 focus:border-primary-neon focus:ring-primary-neon" onchange="updateCapacity()">
+                <div id="capacityWarning" class="text-sm mt-1 text-danger-neon hidden">Advertencia: Aforo superado!</div>
+            </div>
+
+            <!-- Barra de Progreso Dinámica -->
+            <div class="h-4 rounded-full bg-gray-700 overflow-hidden">
+                <div id="capacityBar" class="h-4 bg-primary-neon transition-all duration-500" style="width: 0%;"></div>
+            </div>
+            <p id="capacityStatus" class="text-xs mt-2 text-center font-semibold"></p>
+        </div>
+
+        <!-- --- RELACIÓN HOMBRE/MUJER --- -->
+        <div class="bg-gray-800 p-4 rounded-xl shadow-lg border border-secondary-neon/30 mb-6">
+            <h2 class="text-xl font-bold mb-3 text-secondary-neon">Relación de Género</h2>
+            
+            <!-- Conteo de Género -->
+            <div class="flex justify-around text-center mb-3">
+                <div class="text-male-color">
+                    <span id="manCount" class="text-2xl font-bold">0</span>
+                    <p class="text-sm">Hombres</p>
+                </div>
+                <div class="text-secondary-neon">
+                    <span id="womanCount" class="text-2xl font-bold">0</span>
+                    <p class="text-sm">Mujeres</p>
+                </div>
+            </div>
+
+            <!-- Barra de Relación (Stack) -->
+            <div class="h-6 rounded-lg bg-gray-600 overflow-hidden flex shadow-inner">
+                <div id="manBar" class="h-full bg-male-color transition-all duration-500" style="width: 50%;"></div>
+                <div id="womanBar" class="h-full bg-secondary-neon transition-all duration-500" style="width: 50%;"></div>
+            </div>
+            
+            <!-- Ratio -->
+            <p class="text-sm mt-3 text-center text-gray-200">Ratio Hombres por Mujer: <span id="genderRatio" class="font-bold text-lg text-white">0:0</span></p>
+
+        </div>
+        <!-- --- FIN RELACIÓN HOMBRE/MUJER --- -->
+
+
+        <!-- Controles de Aforo Táctiles (Simulando la entrada) -->
+        <div class="grid grid-cols-2 gap-4 mb-6">
+            <button id="addMan" onclick="addPerson('man')" class="flex flex-col items-center justify-center p-4 bg-male-color hover:bg-male-color/80 text-white font-bold rounded-xl shadow-lg transition duration-200 transform hover:scale-[1.02] disabled:bg-gray-600 disabled:opacity-50">
+                <!-- Icono SVG: Persona que entra -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-8 h-8 mb-1"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>
+                <span>Entra Hombre</span>
             </button>
-            <button id="addWoman" class="flex-1 bg-pink-600 hover:bg-pink-700 text-white font-bold py-2 px-4 rounded-lg transition duration-200 shadow-md active:shadow-inner min-w-[120px]">
-                Añadir Mujer
-            </button>
-            <!-- Botón para limpiar todo, ahora coordinado -->
-            <button id="clearAll" class="flex-1 bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition duration-200 shadow-md active:shadow-inner min-w-[120px]">
-                Limpiar Todo
+            <button id="addWoman" onclick="addPerson('woman')" class="flex flex-col items-center justify-center p-4 bg-secondary-neon hover:bg-secondary-neon/80 text-white font-bold rounded-xl shadow-lg transition duration-200 transform hover:scale-[1.02] disabled:bg-gray-600 disabled:opacity-50">
+                <!-- Icono SVG: Persona que entra -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-8 h-8 mb-1"><path d="M12 5v14"/><path d="m19 12-7 7-7-7"/></svg>
+                <span>Entra Mujer</span>
             </button>
         </div>
 
-        <!-- Lista de Personas Añadidas -->
-        <div class="absolute bottom-4 right-4 p-4 bg-white bg-opacity-90 rounded-xl shadow-2xl z-10 w-full max-w-xs border border-gray-100">
-            <h3 class="text-lg font-bold mb-2 text-gray-800">Personas en Escena (<span id="count">0</span>)</h3>
-            <ul id="peopleList" class="max-h-40 overflow-y-auto space-y-2">
-                <!-- Los elementos de la lista se insertarán aquí -->
-            </ul>
+        <!-- Controles de Salida y Limpieza -->
+        <div class="flex gap-4 mb-6">
+            <button id="clearAll" onclick="clearAllPeople()" class="flex-1 flex items-center justify-center p-3 bg-danger-neon hover:bg-danger-neon/80 text-white font-bold rounded-xl shadow-lg transition duration-200 transform hover:scale-[1.02] disabled:bg-gray-600 disabled:opacity-50">
+                <!-- Icono SVG: Limpiar (Puerta) -->
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6 mr-2"><path d="M13 3h-2a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h2"/><path d="M15 17.5V17a2 2 0 0 0-2-2H9a2 2 0 0 0-2 2v.5"/><path d="M9 15V9h6v6"/></svg>
+                <span>Limpiar Todo</span>
+            </button>
         </div>
         
+        <!-- Lista de Personas -->
+        <h2 class="text-xl font-bold mb-3 text-primary-neon border-b border-primary-neon/50 pb-2">Lista de Asistentes</h2>
+        <ul id="peopleList" class="space-y-2 max-h-48 overflow-y-auto club-scrollbar">
+            <!-- Los elementos de la lista se inyectarán aquí -->
+            <li class="text-gray-400 text-sm italic">La lista se actualizará al añadir personas...</li>
+        </ul>
     </div>
 
-    <script type="module">
-        // Variables globales de Three.js
+    <script>
+        // --- DATA DE NOMBRES ---
+        const MALE_NAMES = ["Alejandro", "Daniel", "Pablo", "Álvaro", "Adrián", "Javier", "Sergio", "Marcos", "Manuel", "Jorge", "Carlos", "Juan", "David", "Miguel", "Antonio", "Luis", "Rafael", "Ricardo", "Fernando", "Diego"];
+        const FEMALE_NAMES = ["Sofía", "Lucía", "Martina", "María", "Paula", "Carla", "Sara", "Laura", "Elena", "Marta", "Carmen", "Ana", "Isabel", "Andrea", "Natalia", "Patricia", "Verónica", "Rocío", "Claudia", "Beatriz"];
+        const SURNAMES = ["García", "Rodríguez", "González", "Fernández", "López", "Martínez", "Sánchez", "Pérez", "Gómez", "Martín", "Jiménez", "Ruiz", "Hernández", "Díaz", "Moreno", "Álvarez", "Muñoz", "Romero", "Alonso", "Gutierrez"];
+        
+        // Almacena los nombres usados para asegurar que no se repitan
+        const usedNames = new Set();
+        
+        // THREE.JS VARIABLES
         let scene, camera, renderer, controls;
-        // Mapa para almacenar los objetos de persona y su estado
-        const people = new Map();
-        let lastTimestamp = 0;
-        const LOOK_INTERVAL = 3000; // Intervalo para mirar aleatoriamente (en ms)
-        const WALK_SPEED = 0.003; // Velocidad de caminata
-        const DANCE_SPEED = 0.002; // Velocidad de animación de baile
+        const people = [];
+        let maxCapacity = 100;
+        let isGlobalRemovalActive = false;
 
-        // --- Lógica de Salida Coordinada ---
-        let isGlobalRemovalActive = false; 
-        let exitOrderIds = []; 
+        // Configuration
+        const CLUB_SIZE = 100;
+        const TIME_TO_REMOVE = 2000; // 2 seconds delay for removal
+        const INTERACTION_DISTANCE = 8; // Distancia máxima para iniciar la conversación
+        const INTERACTION_DURATION = 3000; // Duración de la conversación en ms
+        const Y_SHIFT = 1.0; // Desplazamiento global para que la base del personaje sea Y=0
 
-        // --- Configuración del Club ---
-        const CLUB_SIZE = 15; 
-        const DOOR_POSITION = new THREE.Vector3(-CLUB_SIZE / 2 - 0.05, 0, 0); 
-        const DOOR_ROTATION = Math.PI / 2; 
-        let mainDoorMesh; 
+        // Estado de Zonas del Club
+        const ZONE_BAR = { center: new THREE.Vector3(-30, 0, 0), radius: 10 };
+        const ZONE_DJ = { center: new THREE.Vector3(0, 0, -35), radius: 10 };
+        const ZONE_VIP = { center: new THREE.Vector3(30, 0, 0), radius: 10 };
+        const ZONE_DANCE = { center: new THREE.Vector3(0, 0, 0), radius: 20 };
 
-        // Elementos del DOM
-        const peopleListElement = document.getElementById('peopleList');
-        const countElement = document.getElementById('count');
-        const sceneContainer = document.getElementById('scene-container');
+        // State object for each person (for better state management)
+        const peopleState = [];
+        
+        // Colores base para la ropa (Neón)
+        const MALE_CLOTHES_COLORS = [0x7E57FF, 0x00FFFF, 0xFFFF00]; 
+        const FEMALE_CLOTHES_COLORS = [0xFF57A6, 0xFF00FF, 0x00FF00]; 
+        // Colores base para la 'piel' o el color de la cabeza
+        const SKIN_COLORS = [0xD4A373, 0xBB855C, 0xA07A5D, 0x8D6B4E, 0xFFDEB4]; 
+        
+        // Frases base de IA para la simulación
+        const CONVERSATION_STARTERS_BASE = [
+            "¡Qué buena música!", "¿Vienes mucho por aquí?", "¿Conoces al DJ?", 
+            "¡Me encanta tu outfit!", "¿Tomamos algo?", "¡El ambiente está genial!",
+            "¿Bailamos un poco?", "¡Qué noche!", "¿Qué tal la semana?",
+            "¡Parece que va a ser largo!", "¿Tienes planes para mañana?",
+            "¡Las luces de neón son increíbles!", "¿Has estado en la zona VIP?",
+            "¡El barman es rápido!"
+        ];
 
-        // --- CONSTANTES DE PROPORCIÓN DE CUERPO ---
-        const PERSON_HEIGHT = 1.8;
-        const HEAD_RADIUS = 0.25;
-        const TORSO_HEIGHT = 0.6;
-        const TORSO_RADIUS = 0.25;
-        const LIMB_THICKNESS = 0.1;
-        const LEG_HEIGHT = PERSON_HEIGHT - HEAD_RADIUS * 2 - TORSO_HEIGHT; 
-        const ARM_LENGTH = 0.6;
-
-
-        /**
-         * Crea las paredes del club.
-         */
-        function createWalls(size) {
-            const wallHeight = 4;
-            const wallThicknessInner = 0.1;
-            const wallMaterialInterior = new THREE.MeshLambertMaterial({ color: 0x444444 });
-            const innerRadius = size / 2 + wallThicknessInner / 2;
-            const doorGapWidth = 1.2; 
-            const sideSegmentLength = (size - doorGapWidth) / 2;
-            const createWallSegment = (width, depth, x, z, material) => {
-                const geometry = new THREE.BoxGeometry(width, wallHeight, depth);
-                const mesh = new THREE.Mesh(geometry, material);
-                mesh.position.set(x, wallHeight / 2, z);
-                return mesh;
-            };
-
-            scene.add(createWallSegment(size + wallThicknessInner * 2, wallThicknessInner, 0, -innerRadius, wallMaterialInterior));
-            scene.add(createWallSegment(wallThicknessInner, size + wallThicknessInner * 2, innerRadius, 0, wallMaterialInterior));
-            scene.add(createWallSegment(size + wallThicknessInner * 2, wallThicknessInner, 0, innerRadius, wallMaterialInterior));
-            
-            const xInner = -innerRadius;
-            scene.add(createWallSegment(wallThicknessInner, sideSegmentLength + wallThicknessInner * 2, xInner, -sideSegmentLength / 2 - doorGapWidth / 2, wallMaterialInterior));
-            scene.add(createWallSegment(wallThicknessInner, sideSegmentLength + wallThicknessInner * 2, xInner, sideSegmentLength / 2 + doorGapWidth / 2, wallMaterialInterior));
+        // --- NAME/COLOR/UTILITY LOGIC ---
+        
+        function getRandomColor(colorArray) {
+            return colorArray[Math.floor(Math.random() * colorArray.length)];
         }
-
-        /**
-         * Crea la geometría del pelo con cobertura COMPLETA para la cabeza.
-         */
-        function createHair(headRadius, hairColor, styleId) {
-            const hairMaterial = new THREE.MeshLambertMaterial({ color: hairColor });
-            const hairGroup = new THREE.Group();
+        
+        function generateUniqueName(type) {
+            // ... (Lógica de nombre)
+            const nameList = type === 'man' ? MALE_NAMES : FEMALE_NAMES;
+            let fullName;
+            let attempts = 0;
+            const maxAttempts = nameList.length * SURNAMES.length; 
             
-            // --- BASE DE COBERTURA COMPLETA ---
-            const baseGeo = new THREE.SphereGeometry(headRadius * 1.05, 16, 16);
-            const baseHair = new THREE.Mesh(baseGeo, hairMaterial);
-            baseHair.position.y = headRadius * 0.1; 
-            hairGroup.add(baseHair); 
-
-            // --- DETALLES DE ESTILO ---
-            switch (styleId) {
-                case 'long_ponytail':
-                    // Cola de Caballo (cilindro delgado)
-                    const tailGeo = new THREE.CylinderGeometry(0.15, 0.25, 0.8, 8);
-                    const tail = new THREE.Mesh(tailGeo, hairMaterial);
-                    tail.rotation.x = Math.PI / 2;
-                    tail.position.set(0, -0.2, -headRadius * 1.2); 
-                    hairGroup.add(tail);
-                    break;
-                case 'wavy_bob':
-                    // Volumen superior y lateral
-                    const bobCapGeo = new THREE.SphereGeometry(
-                        headRadius * 1.05, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.75 
-                    );
-                    const bobCap = new THREE.Mesh(bobCapGeo, hairMaterial);
-                    bobCap.rotation.x = Math.PI / 2;
-                    bobCap.position.y = headRadius * 0.3;
-                    hairGroup.add(bobCap);
-                    break;
-                case 'curly_volume':
-                    hairGroup.remove(baseHair); 
-                    const volumeGeo = new THREE.SphereGeometry(headRadius * 1.3, 12, 12);
-                    const volumeHair = new THREE.Mesh(volumeGeo, hairMaterial);
-                    volumeHair.position.y = headRadius * 0.4;
-                    hairGroup.add(volumeHair);
-                    break;
-                case 'short_crop':
-                default:
-                    const topVolumeGeo = new THREE.SphereGeometry(
-                        headRadius * 0.8, 16, 16, 0, Math.PI * 2, 0, Math.PI * 0.5 
-                    ); 
-                    const topVolume = new THREE.Mesh(topVolumeGeo, hairMaterial);
-                    topVolume.rotation.x = Math.PI / 2;
-                    topVolume.position.y = headRadius * 0.5;
-                    hairGroup.add(topVolume);
-                    break;
-            }
-
-            return hairGroup;
-        }
-
-        /**
-         * Crea un brazo o una pierna articulada.
-         * CORRECCIÓN: Se añade 'userData.isLimb = true' para una fácil identificación en createBouncer.
-         * @param {number} length Longitud de la extremidad.
-         * @param {number} thickness Grosor.
-         * @param {THREE.Color} color Color del material.
-         * @returns {THREE.Group} Grupo articulado (pivote en el hombro/cadera).
-         */
-        function createLimb(length, thickness, color) {
-            const material = new THREE.MeshLambertMaterial({ color: color });
-            const geometry = new THREE.BoxGeometry(thickness, length, thickness);
-            const mesh = new THREE.Mesh(geometry, material);
-            
-            // Posicionar la malla para que el origen (pivot) del grupo esté en la articulación
-            mesh.position.y = -length / 2; 
-            
-            const limbGroup = new THREE.Group();
-            limbGroup.userData.isLimb = true; // CORRECCIÓN: Marca el grupo como extremidad
-            limbGroup.add(mesh);
-            return limbGroup;
-        }
-
-        /**
-         * Crea el modelo 3D de una persona con extremidades articuladas.
-         */
-        function createPerson(gender) {
-            const isMan = gender === 'man';
-            const bodyColor = isMan ? 0x1f78b4 : 0xfb923c; 
-            const skinColor = 0xf8d7c4;
-            const hairColors = [0x3a281c, 0x000000, 0xdfc181, 0x8b4513, 0xaa2222]; 
-            const hairColor = hairColors[Math.floor(Math.random() * hairColors.length)];
-            
-            const personGroup = new THREE.Group();
-            personGroup.userData.gender = gender;
-            
-            // --- 1. TORSO (CUERPO) ---
-            const bodyGeometry = new THREE.CylinderGeometry(TORSO_RADIUS, TORSO_RADIUS, TORSO_HEIGHT, 8);
-            const bodyMaterial = new THREE.MeshLambertMaterial({ color: bodyColor });
-            const body = new THREE.Mesh(bodyGeometry, bodyMaterial);
-            // El torso se sienta sobre las piernas (que empiezan en y=0, por lo que su centro está en LEG_HEIGHT + TORSO_HEIGHT/2)
-            body.position.y = LEG_HEIGHT + TORSO_HEIGHT / 2; 
-            personGroup.add(body);
-            personGroup.userData.body = body;
-
-            // --- 2. CABEZA ---
-            const headGeometry = new THREE.SphereGeometry(HEAD_RADIUS, 16, 16);
-            const headMaterial = new THREE.MeshLambertMaterial({ color: skinColor });
-            const head = new THREE.Mesh(headGeometry, headMaterial);
-            // La cabeza se coloca sobre el torso
-            head.position.y = LEG_HEIGHT + TORSO_HEIGHT + HEAD_RADIUS; 
-            
-            // Cabello
-            let hairStyleId;
-            if (isMan) {
-                hairStyleId = Math.random() < 0.8 ? 'short_crop' : 'curly_volume'; 
-            } else {
-                const rand = Math.random();
-                if (rand < 0.4) hairStyleId = 'wavy_bob';
-                else if (rand < 0.8) hairStyleId = 'long_ponytail';
-                else hairStyleId = 'curly_volume';
-            }
-            const hairMesh = createHair(HEAD_RADIUS, hairColor, hairStyleId);
-            head.add(hairMesh);
-            
-            // Ojos (agrupados en la cabeza)
-            const eyeGeometry = new THREE.CircleGeometry(0.05, 8); 
-            const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x000000 });
-            const eyeL = new THREE.Mesh(eyeGeometry, eyeMaterial);
-            eyeL.position.set(-0.1, 0.0, HEAD_RADIUS); 
-            const eyeR = new THREE.Mesh(eyeGeometry, eyeMaterial);
-            eyeR.position.set(0.1, 0.0, HEAD_RADIUS); 
-            
-            const faceGroup = new THREE.Group();
-            faceGroup.add(eyeL, eyeR);
-            faceGroup.position.z = HEAD_RADIUS - 0.01; 
-            head.add(faceGroup);
-            personGroup.add(head);
-            personGroup.userData.head = head;
-
-
-            // --- 3. EXTREMIDADES INFERIORES (PIERNAS) ---
-            const legColor = isMan ? bodyColor : 0x555555; // Pantalones más oscuros
-            
-            // Pierna Izquierda (PI)
-            const legLGroup = createLimb(LEG_HEIGHT, LIMB_THICKNESS * 1.5, legColor);
-            legLGroup.position.set(-TORSO_RADIUS / 2, LEG_HEIGHT, 0); // Posición de la cadera
-            personGroup.add(legLGroup);
-            personGroup.userData.legL = legLGroup;
-
-            // Pierna Derecha (PD)
-            const legRGroup = createLimb(LEG_HEIGHT, LIMB_THICKNESS * 1.5, legColor);
-            legRGroup.position.set(TORSO_RADIUS / 2, LEG_HEIGHT, 0); 
-            personGroup.add(legRGroup);
-            personGroup.userData.legR = legRGroup;
-
-
-            // --- 4. EXTREMIDADES SUPERIORES (BRAZOS) ---
-            const armColor = bodyColor;
-            
-            // Brazo Izquierdo (BI)
-            const armLGroup = createLimb(ARM_LENGTH, LIMB_THICKNESS, armColor);
-            // Posición del hombro (y: parte superior del torso - un poco hacia abajo, x: lateral)
-            armLGroup.position.set(-(TORSO_RADIUS + LIMB_THICKNESS / 2), LEG_HEIGHT + TORSO_HEIGHT - LIMB_THICKNESS, 0); 
-            armLGroup.rotation.z = Math.PI / 2; // Colgar verticalmente
-            personGroup.add(armLGroup);
-            personGroup.userData.armL = armLGroup;
-
-            // Brazo Derecho (BD)
-            const armRGroup = createLimb(ARM_LENGTH, LIMB_THICKNESS, armColor);
-            armRGroup.position.set((TORSO_RADIUS + LIMB_THICKNESS / 2), LEG_HEIGHT + TORSO_HEIGHT - LIMB_THICKNESS, 0); 
-            armRGroup.rotation.z = -Math.PI / 2; 
-            personGroup.add(armRGroup);
-            personGroup.userData.armR = armRGroup;
-
-            personGroup.userData.creationTime = Date.now(); 
-
-            return personGroup;
-        }
-
-        /**
-         * Crea el modelo 3D del Portero (Bouncer) con extremidades.
-         */
-        function createBouncer() {
-            const suitColor = 0x111111; 
-            const hairColor = 0x000000; 
-            const BOUNCER_SCALE = 1.1; 
-            
-            const bouncerGroup = createPerson('man');
-            
-            bouncerGroup.scale.set(BOUNCER_SCALE, BOUNCER_SCALE, BOUNCER_SCALE);
-            bouncerGroup.userData.gender = 'bouncer';
-            
-            // Recolorar para traje de portero
-            bouncerGroup.traverse((object) => {
-                if (object.isMesh && object.material.isMeshLambertMaterial) {
-                    // CORRECCIÓN: Usar la marca 'isLimb' en el grupo padre.
-                    if (object.parent.userData.isLimb) { // Extremidades (cajas dentro de grupos articulados)
-                        object.material.color.set(suitColor);
-                    } else if (object.geometry.type === 'CylinderGeometry') { // Torso
-                        object.material.color.set(suitColor);
-                    } 
+            do {
+                if (attempts >= maxAttempts) {
+                    return type === 'man' ? `Hombre ${peopleState.length + 1}` : `Mujer ${peopleState.length + 1}`;
                 }
-            });
-            
-            // Asignar Cabello Fijo
-            const head = bouncerGroup.userData.head;
-            while(head.children.length > 0) { head.remove(head.children[0]); } // Eliminar pelo anterior
-            const hairMesh = createHair(HEAD_RADIUS, hairColor, 'short_crop');
-            head.add(hairMesh);
 
-            return bouncerGroup;
+                const firstName = nameList[Math.floor(Math.random() * nameList.length)];
+                let surname1 = SURNAMES[Math.floor(Math.random() * SURNAMES.length)];
+                let fullNameTemp = firstName + " " + surname1;
+                
+                if (Math.random() < 0.5) { 
+                    const surname2 = SURNAMES[Math.floor(Math.random() * SURNAMES.length)];
+                    fullNameTemp += " " + surname2;
+                }
+                
+                fullName = fullNameTemp;
+                attempts++;
+            } while (usedNames.has(fullName));
+
+            usedNames.add(fullName);
+            return fullName;
         }
 
         /**
-         * Inicializa la escena 3D, la cámara, el renderizador y los controles.
+         * Genera una frase de conversación única combinando dos frases base.
          */
-        function init() {
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x111122); 
-
-            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.set(-10, 8, 10); 
-            camera.lookAt(0, 0, 0);
-
-            renderer = new THREE.WebGLRenderer({ antialias: true });
-            renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(window.devicePixelRatio);
-            sceneContainer.appendChild(renderer.domElement);
-
-            // Luces (Ambiente tenue y luces de fiesta)
-            const hemisphereLight = new THREE.HemisphereLight(0x444466, 0x000000, 0.6); 
-            scene.add(hemisphereLight);
+        function generateUniquePhrase() {
+            const phrases = [...CONVERSATION_STARTERS_BASE]; 
             
-            const discoLight = new THREE.PointLight(0xFFFFFF, 3.5, 15, 2); 
-            discoLight.position.set(CLUB_SIZE / 3, 3, CLUB_SIZE / 3); 
-            scene.add(discoLight);
-            scene.userData.discoLight = discoLight;
+            if (phrases.length < 2) return phrases[0] || "Hola.";
 
-            const centralSpotLight = new THREE.PointLight(0xFFFFFF, 1.2, CLUB_SIZE * 0.8); 
-            centralSpotLight.position.set(0, 3.5, 0);
-            scene.add(centralSpotLight);
-
-            // Luces Exteriores
-            const doorLightColor = 0xffdd88; 
-            const lightIntensity = 1.0; 
-
-            const doorLightL = new THREE.SpotLight(doorLightColor, lightIntensity, 4, Math.PI / 4, 0.5, 2);
-            doorLightL.position.set(DOOR_POSITION.x + 1.5, 3.0, DOOR_POSITION.z - 1.0);
-            doorLightL.target.position.set(DOOR_POSITION.x, 1.5, DOOR_POSITION.z - 0.5); 
-            scene.add(doorLightL);
-            scene.add(doorLightL.target);
+            let index1 = Math.floor(Math.random() * phrases.length);
+            const phrase1 = phrases[index1];
             
-            const doorLightR = new THREE.SpotLight(doorLightColor, lightIntensity, 4, Math.PI / 4, 0.5, 2);
-            doorLightR.position.set(DOOR_POSITION.x + 1.5, 3.0, DOOR_POSITION.z + 1.0);
-            doorLightR.target.position.set(DOOR_POSITION.x, 1.5, DOOR_POSITION.z + 0.5); 
-            scene.add(doorLightR);
-            scene.add(doorLightR.target);
+            phrases.splice(index1, 1);
+            
+            let index2 = Math.floor(Math.random() * phrases.length);
+            const phrase2 = phrases[index2];
 
-            // Controles de Órbita 
-            controls = new THREE.OrbitControls(camera, renderer.domElement);
-            controls.enableDamping = true; 
-            controls.dampingFactor = 0.05;
-            controls.screenSpacePanning = false;
-            controls.minDistance = 2;
-            controls.maxDistance = 50;
-            controls.maxPolarAngle = Math.PI / 2; 
+            // Formato de combinación
+            const p1 = phrase1.replace(/[?!.]$/, '').trim(); // Quitar puntuación
+            const p2 = phrase2.toLowerCase().replace(/^[¿¡]/, ''); // Convertir a minúsculas y quitar signos iniciales
 
-            // Suelo (Oscuro y Reflectante para ambiente disco)
-            const floorGeometry = new THREE.PlaneGeometry(CLUB_SIZE * 1.5, CLUB_SIZE * 1.5); 
-            const floorMaterial = new THREE.MeshStandardMaterial({ 
-                color: 0x333333, 
-                metalness: 0.5, 
-                roughness: 0.3, 
-                side: THREE.DoubleSide 
+            return `${p1}, y ${p2}`;
+        }
+
+
+        // --- BUBBLE/SPRITE LOGIC (For 3D Text) ---
+
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        
+        function createSpeechBubble(text, color = '#FFFFFF') {
+            const padding = 10;
+            const fontSize = 32;
+            const font = `Bold ${fontSize}px Inter, sans-serif`;
+            
+            context.font = font;
+            const metrics = context.measureText(text);
+            const textWidth = metrics.width;
+            
+            canvas.width = textWidth + padding * 2;
+            canvas.height = fontSize + padding * 2;
+            
+            context.font = font;
+            context.textAlign = 'center';
+            context.textBaseline = 'middle';
+
+            // Background of the bubble
+            context.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            context.beginPath();
+            context.roundRect(0, 0, canvas.width, canvas.height, 10);
+            context.fill();
+
+            // Text
+            context.fillStyle = color;
+            context.fillText(text, canvas.width / 2, canvas.height / 2);
+
+            const texture = new THREE.CanvasTexture(canvas);
+            texture.needsUpdate = true;
+
+            const material = new THREE.SpriteMaterial({ map: texture, transparent: true });
+            const sprite = new THREE.Sprite(material);
+            
+            // Escala para burbujas más pequeñas (0.1)
+            const scaleFactor = 0.1; 
+            sprite.scale.set(canvas.width * scaleFactor, canvas.height * scaleFactor, 1);
+
+            return sprite;
+        }
+
+
+        // --- THREE.JS SCENE SETUP & AMBIENTACION ---
+
+        /**
+         * Crea un objeto cilíndrico de luz de neón.
+         * @param {number} x - Posición X.
+         * @param {number} y - Posición Y.
+         * @param {number} z - Posición Z.
+         * @param {number} color - Color hexadecimal.
+         */
+        function createNeonLight(x, y, z, color) {
+            const lightGeometry = new THREE.CylinderGeometry(0.5, 0.5, 5, 8);
+            const lightMaterial = new THREE.MeshBasicMaterial({
+                color: color,
+                transparent: true,
+                opacity: 0.8
+            });
+            const light = new THREE.Mesh(lightGeometry, lightMaterial);
+            light.position.set(x, y, z);
+            light.rotation.x = Math.PI / 2; // Orientación horizontal
+            scene.add(light);
+
+            // Luz puntual para el brillo
+            const pointLight = new THREE.PointLight(color, 10, 30);
+            pointLight.position.set(x, y, z);
+            scene.add(pointLight);
+        }
+
+        /**
+         * Crea un personaje estático (Barman o DJ).
+         * @param {string} type - 'barman' o 'dj'.
+         * @param {THREE.Vector3} position - Posición (la base del personaje).
+         * @param {number} rotationY - Rotación Y.
+         */
+        function createNPC(type, position, rotationY) {
+             // Materiales
+            const skinColor = getRandomColor(SKIN_COLORS);
+            const clothesColor = (type === 'barman') ? 0x222222 : 0xFF00FF; // Negro o magenta
+            const skinMaterial = new THREE.MeshLambertMaterial({ color: skinColor });
+            const clothesMaterial = new THREE.MeshLambertMaterial({
+                color: clothesColor,
+                emissive: clothesColor,
+                emissiveIntensity: 0.1, 
+                transparent: true,
+                opacity: 0.95
+            });
+
+            // 1. Cabeza (5.5 -> 4.5)
+            const headGeometry = new THREE.SphereGeometry(1.5, 16, 16);
+            const head = new THREE.Mesh(headGeometry, skinMaterial);
+            head.position.y = 5.5 - Y_SHIFT; 
+            head.castShadow = true;
+
+            // 2. Cuerpo (3.25 -> 2.25)
+            const bodyHeight = 4.5;
+            const bodyRadius = 1.2;
+            const bodyGeometry = new THREE.CylinderGeometry(bodyRadius, bodyRadius * 0.8, bodyHeight, 16);
+            const body = new THREE.Mesh(bodyGeometry, clothesMaterial);
+            body.position.y = bodyHeight / 2 + 1 - Y_SHIFT; 
+            body.castShadow = true;
+            
+            // 3. Grupo
+            const npcGroup = new THREE.Group();
+            npcGroup.add(body, head);
+            
+            // Ajustar los pivots de los brazos (4.5 -> 3.5)
+            const armGeometry = new THREE.CylinderGeometry(0.4, 0.4, 3.5, 8);
+            const pivotArmLeft = new THREE.Group();
+            pivotArmLeft.position.set(-bodyRadius, 4.5 - Y_SHIFT, 0); 
+            const armLeft = new THREE.Mesh(armGeometry, clothesMaterial);
+            armLeft.position.x = -1.75; 
+            pivotArmLeft.add(armLeft);
+            
+            const pivotArmRight = new THREE.Group();
+            pivotArmRight.position.set(bodyRadius, 4.5 - Y_SHIFT, 0); 
+            const armRight = new THREE.Mesh(armGeometry, clothesMaterial);
+            armRight.position.x = 1.75; 
+            pivotArmRight.add(armRight);
+            
+            npcGroup.add(pivotArmLeft, pivotArmRight);
+            
+            // Posición y rotación
+            npcGroup.position.copy(position);
+            npcGroup.rotation.y = rotationY;
+            scene.add(npcGroup);
+            
+            // Animación sutil
+            const animationData = {
+                object: npcGroup,
+                offset: Math.random() * 10,
+                armLeft: pivotArmLeft,
+                armRight: pivotArmRight
+            };
+            
+            return animationData;
+        }
+
+        let npcBarman, npcDJ; 
+
+        function setupClubEnvironment() {
+            // --- 1. Pista de Baile (Centro) ---
+            const floorGeometry = new THREE.PlaneGeometry(CLUB_SIZE, CLUB_SIZE);
+            const floorMaterial = new THREE.MeshPhongMaterial({
+                color: 0x050515, 
+                shininess: 80,
+                specular: 0x111155, // Especular púrpura oscuro
             });
             const floor = new THREE.Mesh(floorGeometry, floorMaterial);
             floor.rotation.x = -Math.PI / 2;
-            floor.position.y = 0;
-            floor.receiveShadow = true; 
+            floor.receiveShadow = true;
             scene.add(floor);
+
+            // --- 2. Zona de DJ (Fondo/Centro - Z Negativa) ---
+            const PLATFORM_HEIGHT = 2;
             
-            // Paredes 
-            createWalls(CLUB_SIZE);
+            const djPlatformGeometry = new THREE.BoxGeometry(20, PLATFORM_HEIGHT, 8);
+            const djPlatformMaterial = new THREE.MeshPhongMaterial({ 
+                color: 0x1A0033, // Base muy oscura
+                specular: 0x440099, // Toque especular púrpura
+                shininess: 50 
+            });
+            const djPlatform = new THREE.Mesh(djPlatformGeometry, djPlatformMaterial);
+            djPlatform.position.set(ZONE_DJ.center.x, PLATFORM_HEIGHT / 2, ZONE_DJ.center.z - 2); 
+            djPlatform.receiveShadow = true;
+            scene.add(djPlatform);
 
-            // Puerta Fija
-            mainDoorMesh = createDoor();
-            mainDoorMesh.position.copy(DOOR_POSITION);
-            mainDoorMesh.rotation.y = DOOR_ROTATION; 
-            scene.add(mainDoorMesh);
+            // Luz de neón púrpura debajo de la plataforma (Efecto Escenario Elevado)
+            const djAmbientLight = new THREE.PointLight(0xAA00FF, 5, 15); 
+            djAmbientLight.position.set(ZONE_DJ.center.x, PLATFORM_HEIGHT + 0.5, ZONE_DJ.center.z - 2); // Posición justo encima
+            scene.add(djAmbientLight);
+
+
+            // Mesa de Mezclas (DJ Table) - Detallada
+            const TABLE_HEIGHT = 1.5; // Altura de trabajo sobre el suelo (2m plataforma + 1.5m mesa = 3.5m)
+            const TABLE_TOP_Y = PLATFORM_HEIGHT + TABLE_HEIGHT; 
             
-            // Portero Fijo
-            const bouncer = createBouncer();
-            bouncer.position.set(DOOR_POSITION.x - 0.5, 0, 1.2); 
-            bouncer.rotation.y = Math.PI * 0.55; 
-            scene.add(bouncer);
-
-            // Fila de Espera (Queue)
-            createQueue(4); 
-
-            // Lámpara de calle exterior
-            createStreetLamp(); 
+            const djTableGeometry = new THREE.BoxGeometry(7, 0.5, 2.5);
+            const djTableMaterial = new THREE.MeshBasicMaterial({ 
+                color: 0x000000, 
+                transparent: true, 
+                opacity: 0.8 
+            });
+            const djTable = new THREE.Mesh(djTableGeometry, djTableMaterial);
+            djTable.position.set(ZONE_DJ.center.x, TABLE_TOP_Y - (0.5/2), ZONE_DJ.center.z - 1.5); 
+            scene.add(djTable);
             
-            // Decoración Interior
-            createDecoration();
+            // Simulación de los "Decks" y "Mixer" (Controles)
+            // 1. Mixer central (caja de controles brillante)
+            const mixerGeometry = new THREE.BoxGeometry(1.5, 0.2, 1);
+            const mixerMaterial = new THREE.MeshBasicMaterial({ color: 0x00FFFF, emissive: 0x00FFFF, emissiveIntensity: 0.5 });
+            const mixer = new THREE.Mesh(mixerGeometry, mixerMaterial);
+            mixer.position.set(ZONE_DJ.center.x, TABLE_TOP_Y + 0.1, ZONE_DJ.center.z - 1.5);
+            scene.add(mixer);
 
-            // Event Listeners
+            // 2. Decks laterales (platos)
+            const deckRadius = 1.5;
+            const deckGeometry = new THREE.CylinderGeometry(deckRadius, deckRadius, 0.1, 32);
+            const deckMaterial = new THREE.MeshBasicMaterial({ color: 0x444444 });
+            
+            const deckLeft = new THREE.Mesh(deckGeometry, deckMaterial);
+            deckLeft.position.set(ZONE_DJ.center.x - 2.5, TABLE_TOP_Y + 0.05, ZONE_DJ.center.z - 1.5);
+            deckLeft.rotation.x = Math.PI / 2; // Orientación plana
+            scene.add(deckLeft);
+            
+            const deckRight = new THREE.Mesh(deckGeometry, deckMaterial);
+            deckRight.position.set(ZONE_DJ.center.x + 2.5, TABLE_TOP_Y + 0.05, ZONE_DJ.center.z - 1.5);
+            deckRight.rotation.x = Math.PI / 2;
+            scene.add(deckRight);
+
+
+            // DJ (NPC) - Base en Y=2 (sobre la plataforma)
+            npcDJ = createNPC('dj', new THREE.Vector3(ZONE_DJ.center.x, PLATFORM_HEIGHT, ZONE_DJ.center.z - 3), Math.PI); // Mirando a la pista
+            
+            // --- 3. Zona de Bar (Izquierda - X Negativa) ---
+            const barCounterGeometry = new THREE.BoxGeometry(40, 2.5, 4);
+            const barCounterMaterial = new THREE.MeshBasicMaterial({ color: 0x0A0A0A });
+            const barCounter = new THREE.Mesh(barCounterGeometry, barCounterMaterial);
+            barCounter.position.set(ZONE_BAR.center.x, 1.25, ZONE_BAR.center.z - 18); // Se mueve a la pared
+            barCounter.rotation.y = Math.PI / 2; // Paralelo a X
+            scene.add(barCounter);
+            
+            const barBackGeometry = new THREE.BoxGeometry(40, 10, 0.5);
+            const barBackMaterial = new THREE.MeshBasicMaterial({ color: 0x110022 });
+            const barBack = new THREE.Mesh(barBackGeometry, barBackMaterial);
+            barBack.position.set(ZONE_BAR.center.x, 5, ZONE_BAR.center.z - 20);
+            barBack.rotation.y = Math.PI / 2;
+            scene.add(barBack);
+            
+            // Barman (NPC) - Base en Y=0 (sobre el suelo)
+            npcBarman = createNPC('barman', new THREE.Vector3(ZONE_BAR.center.x, 0, ZONE_BAR.center.z - 18), Math.PI / 2); 
+            
+            // Botellas de Neón
+            for (let i = -15; i < 15; i += 5) {
+                createNeonLight(ZONE_BAR.center.x, 4.5, ZONE_BAR.center.z - 20 + i, 0xFF00FF);
+            }
+            
+            // --- 4. Sala VIP (Derecha - X Positiva) ---
+            const vipPlatformGeometry = new THREE.BoxGeometry(30, 1.5, 20);
+            const vipPlatformMaterial = new THREE.MeshLambertMaterial({ color: 0x442200 });
+            const vipPlatform = new THREE.Mesh(vipPlatformGeometry, vipPlatformMaterial);
+            vipPlatform.position.set(ZONE_VIP.center.x, 0.75, ZONE_VIP.center.z - 10);
+            vipPlatform.receiveShadow = true;
+            scene.add(vipPlatform);
+
+            // Pared de Cristal (Simulación)
+            const vipGlassGeometry = new THREE.BoxGeometry(30, 8, 0.1);
+            const vipGlassMaterial = new THREE.MeshPhongMaterial({
+                color: 0x00FFFF, 
+                transparent: true,
+                opacity: 0.1,
+                shininess: 100
+            });
+            const vipGlass = new THREE.Mesh(vipGlassGeometry, vipGlassMaterial);
+            vipGlass.position.set(ZONE_VIP.center.x, 4, ZONE_VIP.center.z - 20);
+            scene.add(vipGlass);
+
+            // Sofás VIP - Base en Y=1.5
+            const sofaGeometry = new THREE.BoxGeometry(5, 1, 2);
+            const sofaMaterial = new THREE.MeshLambertMaterial({ color: 0x660066 });
+            
+            const sofa1 = new THREE.Mesh(sofaGeometry, sofaMaterial);
+            sofa1.position.set(ZONE_VIP.center.x - 5, 1.5 + (1/2), ZONE_VIP.center.z - 15);
+            sofa1.rotation.y = Math.PI / 4;
+            scene.add(sofa1);
+            
+            const sofa2 = new THREE.Mesh(sofaGeometry, sofaMaterial);
+            sofa2.position.set(ZONE_VIP.center.x + 5, 1.5 + (1/2), ZONE_VIP.center.z - 5);
+            sofa2.rotation.y = -Math.PI / 4;
+            scene.add(sofa2);
+            
+            // --- 5. Luces de Pared (Neón) ---
+            createNeonLight(-40, 5, 40, 0x0000FF);
+            createNeonLight(40, 5, 40, 0xFF0000);
+            createNeonLight(-40, 5, -40, 0x00FF00);
+            createNeonLight(40, 5, -40, 0xFFFF00);
+        }
+
+        function init() {
+            const container = document.getElementById('scene-container');
+            
+            // 1. Scene setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x000000); // Fondo negro total
+
+            // 2. Camera setup
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.set(0, 50, 60);
+
+            // 3. Renderer setup
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true; 
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
+            renderer.toneMapping = THREE.ACESFilmicToneMapping;
+            renderer.toneMappingExposure = 1.0; 
+            container.appendChild(renderer.domElement);
+            
+            // 4. Controls 
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true; 
+            controls.dampingFactor = 0.05;
+            controls.maxDistance = 150;
+            controls.minDistance = 20;
+
+            // 5. Lighting (Estilo Club Oscuro)
+            const spotLight = new THREE.SpotLight(0xffffff, 50, 0, Math.PI / 8, 0.5);
+            spotLight.position.set(0, 80, 0);
+            spotLight.castShadow = true;
+            spotLight.shadow.mapSize.width = 2048;
+            spotLight.shadow.mapSize.height = 2048;
+            spotLight.shadow.camera.near = 10;
+            spotLight.shadow.camera.far = 150;
+            scene.add(spotLight);
+
+            const ambientLight = new THREE.AmbientLight(0x0A0A20, 0.5); // Luz ambiental muy oscura
+            scene.add(ambientLight);
+
+            // Luces de Color pulsantes (Simulación de luces de discoteca)
+            const pulseLight1 = new THREE.PointLight(0xFF00FF, 30, 50); 
+            pulseLight1.position.set(-20, 15, -20);
+            scene.add(pulseLight1);
+            
+            const pulseLight2 = new THREE.PointLight(0x00FFFF, 30, 50); 
+            pulseLight2.position.set(20, 15, 20);
+            scene.add(pulseLight2);
+            
+            // Almacenar las luces para la animación
+            window.pulseLights = [pulseLight1, pulseLight2];
+            
+            // 6. Configurar la ambientación del club
+            setupClubEnvironment();
+
+            // 7. Event listeners
             window.addEventListener('resize', onWindowResize, false);
-            document.getElementById('addMan').addEventListener('click', () => addPerson('man'));
-            document.getElementById('addWoman').addEventListener('click', () => addPerson('woman'));
-            document.getElementById('clearAll').addEventListener('click', clearAllPeople); 
-
-            // Iniciar el bucle de animación
+            
+            // 8. Start loop
             animate();
         }
 
-        /**
-         * Añade una nueva persona a la escena.
-         */
-        function addPerson(gender) {
-            if (isGlobalRemovalActive) return;
-            
-            const id = THREE.MathUtils.generateUUID();
-            const personMesh = createPerson(gender);
-
-            const x = THREE.MathUtils.randFloatSpread(CLUB_SIZE * 0.8);
-            const z = THREE.MathUtils.randFloatSpread(CLUB_SIZE * 0.8);
-            personMesh.position.set(x, 0, z);
-
-            people.set(id, {
-                id: id,
-                mesh: personMesh,
-                gender: gender,
-                isRemoving: false,
-                removalState: 0, 
-                doorMesh: mainDoorMesh, 
-                doorPosition: null, 
-                targetLookRotation: new THREE.Vector3(0, personMesh.rotation.y, 0),
-                lastLookTime: performance.now(), 
-                targetRotation: 0,
-            });
-
-            scene.add(personMesh);
-            updateUI();
-        }
-
-        /**
-         * Lógica para iniciar el proceso de eliminación (animación de salida) para una persona.
-         */
-        function removePersonSetup(id) { 
-            const personState = people.get(id);
-            if (!personState || personState.isRemoving) return;
-
-            personState.isRemoving = true;
-            personState.removalState = 1; 
-
-            const personPos = personState.mesh.position;
-            
-            const doorPos = mainDoorMesh.position.clone();
-            const offset = 0.5; 
-            doorPos.x += offset; 
-            
-            personState.doorPosition = doorPos;
-
-            const directionToDoor = new THREE.Vector3().subVectors(personState.doorPosition, personPos).normalize();
-            personState.targetRotation = Math.atan2(directionToDoor.x, directionToDoor.z);
-        }
-
-        /**
-         * Aplica la animación de baile a una persona.
-         * @param {THREE.Group} mesh La malla principal de la persona.
-         * @param {number} time El tiempo actual para el ciclo.
-         */
-        function applyDanceAnimation(mesh, time) {
-            const freq = time * DANCE_SPEED * 1.5;
-            const sway = Math.sin(freq * 2.5) * 0.05;
-            const bob = Math.cos(freq * 1.5) * 0.05;
-
-            // Movimiento de cadera/cuerpo
-            mesh.rotation.y = sway * 0.5;
-            mesh.rotation.x = sway * 0.2;
-            
-            // Brazo y Pierna simple (opuesto)
-            const armAngle = Math.sin(freq * 4) * 0.3; 
-            mesh.userData.armL.rotation.x = armAngle;
-            mesh.userData.armR.rotation.x = -armAngle;
-            
-            // Las piernas se mueven sutilmente para el ritmo
-            const legAngle = Math.sin(freq * 4 + Math.PI/2) * 0.05;
-            mesh.userData.legL.rotation.x = legAngle;
-            mesh.userData.legR.rotation.x = -legAngle;
-
-            // Movimiento de cabeza
-            mesh.userData.head.position.y = (LEG_HEIGHT + TORSO_HEIGHT + HEAD_RADIUS) + bob;
-        }
-
-        /**
-         * Aplica la animación de caminar a una persona.
-         * @param {THREE.Group} mesh La malla principal de la persona.
-         * @param {number} time El tiempo actual para el ciclo.
-         * CORRECCIÓN: Se ajusta la velocidad del paso.
-         */
-        function applyWalkAnimation(mesh, time) {
-            const stepFreq = time * 0.015 * 1.5; // Ajuste de frecuencia
-            const stepAngle = Math.sin(stepFreq) * 0.4; // Ángulo de paso 
-            
-            // Brazos opuestos
-            mesh.userData.armL.rotation.x = stepAngle;
-            mesh.userData.armR.rotation.x = -stepAngle;
-
-            // Piernas opuestas (desfasadas)
-            mesh.userData.legL.rotation.x = -stepAngle; 
-            mesh.userData.legR.rotation.x = stepAngle;
-
-            // Movimiento de cuerpo sutil al caminar (subida/bajada)
-            mesh.position.y = Math.abs(Math.sin(stepFreq * 0.5)) * 0.03; 
-        }
-
-        /**
-         * Bucle principal de animación (Llamado 60 veces por segundo).
-         */
-        function animate(timestamp = 0) {
-            requestAnimationFrame(animate);
-
-            const deltaTime = timestamp - lastTimestamp;
-            lastTimestamp = timestamp;
-
-            controls.update(); 
-            
-            // Ciclo de color para la luz de disco
-            if (scene.userData.discoLight) {
-                const time = timestamp * 0.001;
-                const color = new THREE.Color();
-                color.setHSL(Math.sin(time * 0.3) * 0.5 + 0.5, 1, 0.7); 
-                scene.userData.discoLight.color.copy(color);
-            }
-
-
-            people.forEach((state, id) => {
-                const mesh = state.mesh;
-                const head = mesh.userData.head;
-
-                
-                // --- A) Animación de Mirada / Baile (Idle) ---
-                if (!state.isRemoving) { 
-                    applyDanceAnimation(mesh, timestamp);
-
-                    // Mirada aleatoria (solo en el eje Y de la cabeza)
-                    if (timestamp - state.lastLookTime > LOOK_INTERVAL) { 
-                        state.targetLookRotation.y = THREE.MathUtils.randFloat(-Math.PI * 0.1, Math.PI * 0.1);
-                        state.lastLookTime = timestamp; 
-                    }
-                    head.rotation.y = THREE.MathUtils.lerp(head.rotation.y, state.targetLookRotation.y, 0.05);
-                } else {
-                    // Si está saliendo, restablecer la rotación de la cabeza (para que mire hacia adelante)
-                    head.rotation.set(0,0,0);
-                }
-
-                // --- B) Animación de Eliminación (Removal) ---
-                if (state.isRemoving) {
-                    
-                    // Estado 1: Girar hacia la Puerta
-                    if (state.removalState === 1) {
-                        const currentRotation = mesh.rotation.y;
-                        
-                        let diff = state.targetRotation - currentRotation;
-                        if (diff > Math.PI) diff -= (2 * Math.PI);
-                        if (diff < -Math.PI) diff += (2 * Math.PI);
-
-                        const rotationStep = diff * 0.05; 
-                        mesh.rotation.y += rotationStep;
-
-                        if (Math.abs(diff) < 0.01) {
-                            mesh.rotation.y = state.targetRotation;
-                            state.removalState = 2; 
-                        }
-                        
-                        // En espera, aplicar animación de brazos sueltos (sutil)
-                        mesh.userData.armL.rotation.x = Math.sin(timestamp * 0.005) * 0.1;
-                        mesh.userData.armR.rotation.x = -mesh.userData.armL.rotation.x;
-                        mesh.userData.legL.rotation.x = 0;
-                        mesh.userData.legR.rotation.x = 0;
-                        mesh.position.y = 0; // Posición fija
-                    } 
-                    
-                    // Estado 2: Caminar hacia la Puerta
-                    else if (state.removalState === 2) {
-                        applyWalkAnimation(mesh, timestamp); // Aplicar animación de caminata
-
-                        const targetPos = state.doorPosition;
-                        const currentPos = mesh.position;
-
-                        currentPos.lerp(targetPos, WALK_SPEED * deltaTime);
-                        
-                        if (currentPos.distanceTo(targetPos) < 0.1) {
-                            state.removalState = 3; 
-                            // Restablecer posición de extremidades al finalizar el paso
-                            mesh.position.y = 0;
-                            mesh.userData.armL.rotation.x = 0;
-                            mesh.userData.armR.rotation.x = 0;
-                            mesh.userData.legL.rotation.x = 0;
-                            mesh.userData.legR.rotation.x = 0;
-                        }
-                    } 
-                    
-                    // Estado 3: Abrir Puerta y Desaparecer
-                    else if (state.removalState === 3) {
-                        const doorHinge = state.doorMesh.userData.hinge;
-                        
-                        const targetRotation = Math.PI * 0.9; 
-                        doorHinge.rotation.y = THREE.MathUtils.lerp(doorHinge.rotation.y, targetRotation, 0.05);
-
-                        if (doorHinge.rotation.y > Math.PI * 0.2) {
-                            applyWalkAnimation(mesh, timestamp); // Sigue caminando
-                            mesh.translateZ(WALK_SPEED * deltaTime * 1.5); 
-                        }
-                        
-                        if (mesh.position.x < -CLUB_SIZE / 2 - 1) { 
-                            state.removalState = 4; 
-                        }
-                    }
-                    
-                    // Estado 4: Desaparecer (Limpiar)
-                    else if (state.removalState === 4) {
-                        scene.remove(mesh);
-                        people.delete(id); 
-                        
-                        if (isGlobalRemovalActive) {
-                            if (exitOrderIds.length > 0) {
-                                const nextId = exitOrderIds.shift();
-                                removePersonSetup(nextId); 
-                            } else {
-                                isGlobalRemovalActive = false;
-                            }
-                        }
-
-                        updateUI(); 
-                    }
-                }
-            });
-
-            // Lógica global para cerrar la puerta después de su uso.
-            const isDoorBeingUsed = Array.from(people.values()).some(p => p.removalState >= 3);
-            
-            if (!isDoorBeingUsed && mainDoorMesh && mainDoorMesh.userData.hinge.rotation.y > 0.01) {
-                mainDoorMesh.userData.hinge.rotation.y = THREE.MathUtils.lerp(
-                    mainDoorMesh.userData.hinge.rotation.y, 
-                    0, 
-                    0.03
-                );
-            }
-
-
-            renderer.render(scene, camera);
-        }
-        
-        // --- Funciones auxiliares sin cambios funcionales mayores ---
         function onWindowResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
-        function createDoor() {
-            const DOOR_HEIGHT = 1.9; 
-            const DOOR_WIDTH = 0.9;  
-            const doorGroup = new THREE.Group();
-            const frameMaterial = new THREE.MeshLambertMaterial({ color: 0x666666 }); 
-            const frameThickness = 0.1;
-            const topFrame = new THREE.Mesh(new THREE.BoxGeometry(DOOR_WIDTH + frameThickness * 2, frameThickness, frameThickness), frameMaterial);
-            topFrame.position.set(0, DOOR_HEIGHT + frameThickness / 2, 0);
-            const leftFrame = new THREE.Mesh(new THREE.BoxGeometry(frameThickness, DOOR_HEIGHT + frameThickness, frameThickness), frameMaterial);
-            leftFrame.position.set(-(DOOR_WIDTH / 2) - (frameThickness / 2), DOOR_HEIGHT / 2, 0);
-            const rightFrame = new THREE.Mesh(new THREE.BoxGeometry(frameThickness, DOOR_HEIGHT + frameThickness, frameThickness), frameMaterial);
-            rightFrame.position.set((DOOR_WIDTH / 2) + (frameThickness / 2), DOOR_HEIGHT / 2, 0);
-            doorGroup.add(topFrame, leftFrame, rightFrame);
-            const doorGeometry = new THREE.BoxGeometry(DOOR_WIDTH, DOOR_HEIGHT, 0.05);
-            const doorMaterial = new THREE.MeshLambertMaterial({ color: 0x333333 }); 
-            const door = new THREE.Mesh(doorGeometry, doorMaterial);
-            const doorHinge = new THREE.Group();
-            doorHinge.add(door);
-            doorHinge.position.x = -DOOR_WIDTH / 2; 
-            door.position.x = DOOR_WIDTH / 2;
-            door.position.y = DOOR_HEIGHT / 2;
-            door.position.z = -frameThickness/2;
-            doorGroup.add(doorHinge);
-            doorGroup.userData.hinge = doorHinge;
-            return doorGroup;
-        }
-        function createDecoration() {
-            const decoGroup = new THREE.Group();
-            const pillarGeo = new THREE.CylinderGeometry(0.3, 0.3, 3, 16);
-            const pillarMat = new THREE.MeshLambertMaterial({ color: 0x555555 });
-            const pillar = new THREE.Mesh(pillarGeo, pillarMat);
-            pillar.position.set(CLUB_SIZE / 2 - 1.5, 1.5, CLUB_SIZE / 2 - 1.5); 
-            decoGroup.add(pillar);
-            const bulbGeo = new THREE.SphereGeometry(0.2, 12, 12);
-            const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffa500, transparent: true, opacity: 0.8 });
-            const bulb = new THREE.Mesh(bulbGeo, bulbMat);
-            bulb.position.set(CLUB_SIZE / 2 - 1.5, 3, CLUB_SIZE / 2 - 1.5);
-            decoGroup.add(bulb);
-            scene.add(decoGroup);
-        }
-        function createStreetLamp() {
-            const poleHeight = 4.5;
-            const poleRadius = 0.1;
-            const lampColor = 0x888888;
-            const poleGeo = new THREE.CylinderGeometry(poleRadius, poleRadius, poleHeight, 8);
-            const poleMat = new THREE.MeshLambertMaterial({ color: lampColor });
-            const pole = new THREE.Mesh(poleGeo, poleMat);
-            pole.position.y = poleHeight / 2;
-            const lampGroup = new THREE.Group();
-            lampGroup.position.set(DOOR_POSITION.x - 4, 0, 0);
-            const streetLampLight = new THREE.PointLight(0xffddaa, 2.5, 12); 
-            streetLampLight.position.set(0, poleHeight + 0.2, 0); 
-            const bulbGeo = new THREE.SphereGeometry(0.15, 8, 8);
-            const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffddaa });
-            const bulb = new THREE.Mesh(bulbGeo, bulbMat);
-            bulb.position.set(0, poleHeight + 0.2, 0);
-            lampGroup.add(pole, streetLampLight, bulb);
-            scene.add(lampGroup);
-        }
-        function createQueue(count) {
-            const queueStartPos = new THREE.Vector3(DOOR_POSITION.x - 3.5, 0, 0.7); 
-            const spacing = 1.0; 
-            for (let i = 0; i < count; i++) {
-                const gender = i % 2 === 0 ? 'man' : 'woman';
-                const personMesh = createPerson(gender); 
-                personMesh.position.set(queueStartPos.x - i * spacing, 0, queueStartPos.z);
-                personMesh.rotation.y = Math.PI / 2; 
-                scene.add(personMesh);
+
+        // --- CORE LOGIC ---
+        
+        /**
+         * Genera un destino aleatorio que evita las áreas restringidas (Bar, DJ).
+         */
+        function getRandomDestination() {
+            let x, z;
+            let targetPosition;
+            let attempts = 0;
+            const CLUB_HALF = CLUB_SIZE / 2;
+
+            // Se elige una zona de destino con cierta probabilidad
+            let zone;
+            const r = Math.random();
+            if (r < 0.5) {
+                // 50% de probabilidad de ir a la pista de baile
+                zone = ZONE_DANCE;
+            } else if (r < 0.75) {
+                // 25% de probabilidad de ir cerca del Bar
+                zone = ZONE_BAR;
+            } else {
+                 // 25% de probabilidad de ir cerca del VIP
+                zone = ZONE_VIP;
             }
-        }
-        function clearAllPeople() {
-            if (people.size === 0 || isGlobalRemovalActive) return;
-            exitOrderIds = Array.from(people.keys());
-            isGlobalRemovalActive = true;
-            if (exitOrderIds.length > 0) {
-                const firstId = exitOrderIds.shift(); 
-                removePersonSetup(firstId); 
-            } 
-            if (mainDoorMesh) {
-                mainDoorMesh.userData.hinge.rotation.y = 0;
-            }
-            updateUI();
-        }
-        function removePerson(id) {
-            if (isGlobalRemovalActive) return; 
-            removePersonSetup(id);
-            updateUI();
-        }
-        function updateUI() {
-            peopleListElement.innerHTML = '';
-            let currentCount = 0;
-            people.forEach(state => {
-                currentCount++;
-                let statusText = state.isRemoving ? '(Saliendo)' : '(Presente)';
-                let className = `flex justify-between items-center p-2 rounded-lg ${state.gender === 'man' ? 'bg-blue-50' : 'bg-pink-50'} border border-gray-200`;
-                const isWaitingInQueue = isGlobalRemovalActive && !state.isRemoving && exitOrderIds.includes(state.id);
-                if (isWaitingInQueue) {
-                    statusText = '(En cola)';
-                    className = `flex justify-between items-center p-2 rounded-lg ${state.gender === 'man' ? 'bg-blue-100' : 'bg-pink-100'} border border-yellow-400`;
+
+
+            do {
+                // Generar posición dentro de la zona elegida
+                x = zone.center.x + (Math.random() * zone.radius * 2 - zone.radius);
+                z = zone.center.z + (Math.random() * zone.radius * 2 - zone.radius);
+                targetPosition = new THREE.Vector3(x, 0, z);
+                
+                // Asegurar que la posición no esté demasiado cerca de las estructuras estáticas (Bar/DJ)
+                const distToDJ = targetPosition.distanceTo(ZONE_DJ.center);
+                const distToBar = targetPosition.distanceTo(ZONE_BAR.center);
+
+                // Evitar el área de DJ y el área de Bar por unos 5 metros de radio (evitar chocar con las estructuras)
+                if (distToDJ > 5 && distToBar > 5) {
+                    // Asegurar que está dentro de los límites generales del club
+                    if (x > -CLUB_HALF * 0.9 && x < CLUB_HALF * 0.9 && z > -CLUB_HALF * 0.9 && z < CLUB_HALF * 0.9) {
+                        return targetPosition;
+                    }
                 }
+                attempts++;
+            } while (attempts < 10);
+
+            // En caso de fallar (muy improbable), usa un punto seguro
+            return new THREE.Vector3(0, 0, 0); 
+        }
+        
+        function createPerson(type) {
+            const id = Date.now() + Math.random(); // Unique ID
+            const fullName = generateUniqueName(type);
+            
+            const clothesPalette = (type === 'man') ? MALE_CLOTHES_COLORS : FEMALE_CLOTHES_COLORS;
+            const skinColor = getRandomColor(SKIN_COLORS);
+            const clothesColor = getRandomColor(clothesPalette);
+
+            const skinMaterial = new THREE.MeshLambertMaterial({ color: skinColor });
+            const clothesMaterial = new THREE.MeshLambertMaterial({
+                color: clothesColor,
+                emissive: clothesColor,
+                emissiveIntensity: 0.1, 
+                transparent: true,
+                opacity: 0.95
+            });
+
+            // 1. Cabeza (5.5 -> 4.5)
+            const headGeometry = new THREE.SphereGeometry(1.5, 16, 16);
+            const head = new THREE.Mesh(headGeometry, skinMaterial);
+            head.position.y = 5.5 - Y_SHIFT; 
+            head.castShadow = true;
+
+            // 2. Cuerpo (3.25 -> 2.25)
+            const bodyHeight = 4.5;
+            const bodyRadius = 1.2;
+            const bodyGeometry = new THREE.CylinderGeometry(bodyRadius, bodyRadius * 0.8, bodyHeight, 16);
+            const body = new THREE.Mesh(bodyGeometry, clothesMaterial);
+            body.position.y = bodyHeight / 2 + 1 - Y_SHIFT; 
+            body.castShadow = true;
+
+            // 3. Piernas (1 -> 0)
+            const legGeometry = new THREE.CylinderGeometry(0.5, 0.5, 2, 8);
+            const legMaterial = new THREE.MeshLambertMaterial({ color: 0x333333 }); 
+            
+            const legLeft = new THREE.Mesh(legGeometry, legMaterial);
+            legLeft.position.set(-0.6, 1 - Y_SHIFT, 0); 
+            legLeft.castShadow = true;
+
+            const legRight = new THREE.Mesh(legGeometry, legMaterial);
+            legRight.position.set(0.6, 1 - Y_SHIFT, 0); 
+            legRight.castShadow = true;
+            
+            // 4. Brazos (4.5 -> 3.5)
+            const armGeometry = new THREE.CylinderGeometry(0.4, 0.4, 3.5, 8); 
+            const armLeft = new THREE.Mesh(armGeometry, clothesMaterial);
+            const armRight = new THREE.Mesh(armGeometry, clothesMaterial);
+            
+            const pivotArmLeft = new THREE.Group();
+            pivotArmLeft.position.set(-bodyRadius, 4.5 - Y_SHIFT, 0); 
+            armLeft.position.x = -1.75; 
+            pivotArmLeft.add(armLeft);
+
+            const pivotArmRight = new THREE.Group();
+            pivotArmRight.position.set(bodyRadius, 4.5 - Y_SHIFT, 0); 
+            armRight.position.x = 1.75; 
+            pivotArmRight.add(armRight);
+
+            // 5. Cabello (4.5)
+            let hair;
+            if (type === 'man') {
+                const hairGeometry = new THREE.SphereGeometry(1.6, 16, 16);
+                hair = new THREE.Mesh(hairGeometry, new THREE.MeshLambertMaterial({ color: 0x4B3A2C })); 
+                hair.position.y = head.position.y;
+                hair.scale.y = 0.8;
+            } else {
+                const hairGeometry = new THREE.TorusGeometry(1.8, 0.4, 8, 16);
+                hair = new THREE.Mesh(hairGeometry, new THREE.MeshLambertMaterial({ color: 0xDDDDDD })); 
+                hair.rotation.x = Math.PI / 2;
+                hair.position.y = head.position.y;
+                hair.position.z = 0.2;
+            }
+            hair.castShadow = true;
+
+            const personGroup = new THREE.Group();
+            personGroup.add(legLeft, legRight, body, head, hair, pivotArmLeft, pivotArmRight);
+            personGroup.traverse(function(object) {
+                if (object.isMesh) {
+                    object.castShadow = true;
+                    object.receiveShadow = true;
+                }
+            });
+
+            // Posición inicial aleatoria (utilizando la lógica de destino). Y siempre 0 (piso)
+            const initialDestination = getRandomDestination();
+            personGroup.position.copy(initialDestination);
+            personGroup.rotation.y = Math.random() * Math.PI * 2; 
+
+            scene.add(personGroup);
+
+            // Store State
+            people.push(personGroup);
+            peopleState.push({
+                id: id,
+                type: type, 
+                name: fullName,
+                object: personGroup,
+                bodyMesh: body, 
+                armLeftPivot: pivotArmLeft,  
+                armRightPivot: pivotArmRight,
+                destination: getRandomDestination(), 
+                speed: 0.05 + Math.random() * 0.1, 
+                danceOffset: Math.random() * 10,
+                isRemoving: false,
+                removalTimer: null,
+                isInteracting: false,          
+                interactionTargetId: null,     
+                interactionTimer: null,        
+                speechBubble: null,            
+                clothesColor: `#${clothesColor.toString(16).padStart(6, '0')}` 
+            });
+
+            updateUI();
+        }
+
+        function removePerson(id) {
+            // ... (Lógica de eliminación)
+            const state = peopleState.find(p => p.id === id);
+            if (!state || state.isRemoving) return;
+            
+            endInteraction(state);
+            if (state.interactionTargetId) {
+                const targetState = peopleState.find(p => p.id === state.interactionTargetId);
+                if (targetState) {
+                    endInteraction(targetState);
+                }
+            }
+
+            usedNames.delete(state.name);
+
+            state.isRemoving = true;
+            updateUI();
+
+            state.removalTimer = setTimeout(() => {
+                const index = peopleState.findIndex(p => p.id === id);
+                if (index !== -1) {
+                    scene.remove(state.object);
+                    people.splice(people.indexOf(state.object), 1);
+                    peopleState.splice(index, 1);
+                    updateUI();
+                }
+            }, TIME_TO_REMOVE);
+        }
+
+        function clearAllPeople() {
+            // ... (Lógica de limpiar todo)
+            if (isGlobalRemovalActive || peopleState.length === 0) return;
+
+            isGlobalRemovalActive = true;
+            usedNames.clear(); 
+            updateUI(); 
+
+            let delay = 0;
+            peopleState.forEach(state => {
+                if (!state.isRemoving) {
+                    delay += 50; 
+                    setTimeout(() => removePerson(state.id), delay);
+                }
+            });
+            
+            setTimeout(() => {
+                // Re-check state after all planned removals
+                if (peopleState.every(p => p.isRemoving === true) || peopleState.length === 0) {
+                    isGlobalRemovalActive = false;
+                    updateUI(); 
+                }
+            }, delay + TIME_TO_REMOVE + 100);
+        }
+
+        function addPerson(type) {
+            // ... (Lógica de añadir persona)
+            if (isGlobalRemovalActive) return;
+            if (people.length < maxCapacity) {
+                createPerson(type);
+            } else {
+                showModal('Aforo Lleno', 'No se pueden añadir más personas. El aforo máximo de ' + maxCapacity + ' personas ha sido alcanzado.', 'danger');
+            }
+        }
+        
+        // --- INTERACTION LOGIC ---
+
+        function startInteraction(personAState, personBState) {
+            // ... (Lógica de inicio de interacción)
+            personAState.isInteracting = true;
+            personAState.interactionTargetId = personBState.id;
+            
+            personBState.isInteracting = true;
+            personBState.interactionTargetId = personAState.id;
+            
+            const midpoint = personAState.object.position.clone().add(personBState.object.position).multiplyScalar(0.5);
+            personAState.destination = midpoint;
+            personBState.destination = midpoint;
+            
+            // Orientar personas
+            const directionA = personBState.object.position.clone().sub(personAState.object.position).normalize();
+            const targetRotationA = Math.atan2(directionA.x, directionA.z); 
+            personAState.object.rotation.y = targetRotationA;
+            
+            const directionB = personAState.object.position.clone().sub(personBState.object.position).normalize();
+            const targetRotationB = Math.atan2(directionB.x, directionB.z); 
+            personBState.object.rotation.y = targetRotationB;
+
+            const phrase = generateUniquePhrase();
+            
+            personAState.speechBubble = createSpeechBubble(phrase, personAState.clothesColor);
+            personAState.speechBubble.position.set(0, 5.5, 0); 
+            personAState.object.add(personAState.speechBubble);
+            
+            const responsePhrase = generateUniquePhrase();
+            personBState.speechBubble = createSpeechBubble(responsePhrase, personBState.clothesColor);
+            personBState.speechBubble.position.set(0, 5.5, 0); 
+            personBState.object.add(personBState.speechBubble);
+
+            const interactionTime = INTERACTION_DURATION + Math.random() * 2000;
+
+            personAState.interactionTimer = setTimeout(() => {
+                endInteraction(personAState);
+                if (personBState.interactionTargetId === personAState.id) {
+                    endInteraction(personBState);
+                }
+            }, interactionTime); 
+            
+            personBState.interactionTimer = setTimeout(() => {
+                endInteraction(personBState);
+                if (personAState.interactionTargetId === personBState.id) {
+                    endInteraction(personAState);
+                }
+            }, interactionTime + 500);
+        }
+
+        function endInteraction(personState) {
+            // ... (Lógica de fin de interacción)
+            personState.isInteracting = false;
+            personState.interactionTargetId = null;
+            
+            clearTimeout(personState.interactionTimer);
+            if (personState.speechBubble) {
+                personState.object.remove(personState.speechBubble);
+                personState.speechBubble.material.map.dispose();
+                personState.speechBubble.material.dispose();
+                personState.speechBubble.geometry.dispose();
+                personState.speechBubble = null;
+            }
+            
+            personState.destination = getRandomDestination(); 
+        }
+
+        function checkInteractions() {
+            // ... (Lógica de chequeo de interacción)
+            for (let i = 0; i < peopleState.length; i++) {
+                const personA = peopleState[i];
+                
+                if (personA.isRemoving || personA.isInteracting) continue;
+
+                for (let j = i + 1; j < peopleState.length; j++) {
+                    const personB = peopleState[j];
+
+                    if (personB.isRemoving || personB.isInteracting) continue;
+
+                    const distance = personA.object.position.distanceTo(personB.object.position);
+                    
+                    if (distance < INTERACTION_DISTANCE) {
+                        if (Math.random() < 0.1) {
+                            startInteraction(personA, personB);
+                            break; 
+                        }
+                    }
+                }
+            }
+        }
+        
+        // --- ANIMATION LOOP ---
+        
+        function animate(time) {
+            requestAnimationFrame(animate);
+
+            controls.update(); 
+            
+            // Animación de luces (simulando pulsaciones)
+            if (window.pulseLights) {
+                 window.pulseLights.forEach((light, index) => {
+                    // Pulso de intensidad basado en el tiempo
+                    light.intensity = 20 + 10 * Math.sin(time / 500 + index * Math.PI); 
+                 });
+            }
+
+            // Animación del DJ (manos en la mesa)
+            if (npcDJ && npcDJ.armLeft) {
+                const armSwing = Math.sin(time / 150) * 0.4;
+                npcDJ.armLeft.rotation.z = Math.sin(time / 300) * 0.4;
+                npcDJ.armLeft.rotation.x = armSwing;
+                
+                npcDJ.armRight.rotation.z = Math.sin(time / 300 + Math.PI) * 0.4;
+                npcDJ.armRight.rotation.x = -armSwing; 
+            }
+
+            // Chequeo de interacciones cada ~1 segundo
+            if (peopleState.length >= 2 && Math.floor(time / 1000) !== Math.floor((time - 16) / 1000)) {
+                checkInteractions();
+            }
+
+            // Movement, Dancing, and Interaction
+            peopleState.forEach(state => {
+                const person = state.object;
+                
+                if (state.isRemoving) {
+                    // Lógica de Salida (Fade out y movimiento a punto de salida)
+                    person.traverse(function(object) {
+                        if (object.isMesh) {
+                            if (object.material.transparent) {
+                                object.material.opacity = Math.max(0, object.material.opacity - 0.02);
+                            }
+                            if (!object.material.transparent) {
+                                object.material.transparent = true;
+                                object.material.opacity = 0.95; 
+                            }
+                        }
+                    });
+
+                    const exitTarget = new THREE.Vector3(0, 0, CLUB_SIZE / 2);
+                    const exitDirection = exitTarget.clone().sub(person.position).normalize();
+                    person.position.add(exitDirection.multiplyScalar(0.5));
+                    return; 
+                } 
+                
+                // Lógica de Interacción/Movimiento
+                if (state.isInteracting) {
+                    // Estar quieto y orientado al target
+                    const targetState = peopleState.find(p => p.id === state.interactionTargetId);
+                    if (targetState) {
+                        const direction = targetState.object.position.clone().sub(person.position).normalize();
+                        const targetRotation = Math.atan2(direction.x, direction.z) + Math.PI; 
+                        person.rotation.y += (targetRotation - person.rotation.y) * 0.1;
+                    }
+                    
+                    person.position.y = Math.sin(time / 400 + state.danceOffset) * 0.1; 
+                } else {
+                    // Movement: Move towards destination
+                    const distance = person.position.distanceTo(state.destination);
+                    if (distance < 3) { 
+                        state.destination = getRandomDestination(); 
+                    }
+
+                    const direction = state.destination.clone().sub(person.position).normalize();
+                    const targetRotation = Math.atan2(direction.x, direction.z);
+                    person.rotation.y += (targetRotation - person.rotation.y) * 0.05;
+
+                    person.position.add(direction.multiplyScalar(state.speed));
+
+                    // "Dancing": Full movement
+                    person.position.y = Math.sin(time / 200 + state.danceOffset) * 0.3; 
+                }
+                
+                // Animación de Brazos y Cuerpo (Siempre activo)
+                if (state.bodyMesh) {
+                    const danceFactor = state.isInteracting ? 0.5 : 1.0; 
+                    
+                    const bodyRotationX = Math.sin(time / 400 + state.danceOffset * 2) * 0.2 * danceFactor;
+                    const bodyRotationZ = Math.cos(time / 400 + state.danceOffset * 2) * 0.2 * danceFactor;
+                    state.bodyMesh.rotation.x = bodyRotationX;
+                    state.bodyMesh.rotation.z = bodyRotationZ;
+                    
+                    const armSwing = Math.sin(time / 150 + state.danceOffset) * 0.6 * danceFactor; 
+                    
+                    state.armLeftPivot.rotation.z = Math.sin(time / 300 + state.danceOffset * 3) * 0.4 * danceFactor;
+                    state.armLeftPivot.rotation.x = armSwing;
+                    
+                    state.armRightPivot.rotation.z = Math.sin(time / 300 + state.danceOffset * 3 + Math.PI) * 0.4 * danceFactor; 
+                    state.armRightPivot.rotation.x = -armSwing; 
+                }
+            });
+
+            renderer.render(scene, camera);
+        }
+
+        // --- UI / DASHBOARD LOGIC (Sin cambios en funcionalidad) ---
+
+        function updateCapacity() {
+            const input = document.getElementById('maxCapacity');
+            const newCapacity = parseInt(input.value);
+            if (newCapacity > 0) {
+                maxCapacity = newCapacity;
+            } else {
+                input.value = maxCapacity; 
+            }
+            updateUI();
+        }
+
+        function updateUI() {
+            const currentCount = people.length;
+            
+            const manCount = peopleState.filter(p => p.type === 'man' && !p.isRemoving).length;
+            const womanCount = peopleState.filter(p => p.type === 'woman' && !p.isRemoving).length;
+            const totalActive = manCount + womanCount;
+
+            // --- AFORO GENERAL ---
+            const percentage = maxCapacity > 0 ? (currentCount / maxCapacity) * 100 : 0;
+            document.getElementById('currentCount').textContent = currentCount;
+            const capacityBar = document.getElementById('capacityBar');
+            const capacityStatus = document.getElementById('capacityStatus');
+            const capacityWarning = document.getElementById('capacityWarning');
+
+            let barColor = 'bg-primary-neon';
+            let statusText = `${Math.round(percentage)}% de la capacidad total`;
+            
+            if (percentage >= 100) {
+                barColor = 'bg-red-600';
+                statusText = `¡AFORO MÁXIMO ALCANZADO! ${currentCount}/${maxCapacity}`;
+                capacityWarning.classList.remove('hidden');
+            } else if (percentage >= 80) {
+                barColor = 'bg-orange-400';
+                capacityWarning.classList.add('hidden');
+            } else {
+                capacityWarning.classList.add('hidden');
+            }
+
+            capacityBar.style.width = `${Math.min(100, percentage)}%`;
+            capacityBar.className = `h-4 rounded-full transition-all duration-500 ${barColor}`;
+            capacityStatus.textContent = statusText;
+            
+            
+            // --- RELACIÓN DE GÉNERO ---
+            document.getElementById('manCount').textContent = manCount;
+            document.getElementById('womanCount').textContent = womanCount;
+
+            let manPercent = 0;
+            let womanPercent = 0;
+            let ratioText = "0:0";
+
+            if (totalActive > 0) {
+                manPercent = (manCount / totalActive) * 100;
+                womanPercent = (womanCount / totalActive) * 100;
+                
+                if (womanCount > 0) {
+                    const ratio = (manCount / womanCount).toFixed(1);
+                    ratioText = `${ratio}:1`;
+                } else if (manCount > 0) {
+                    ratioText = `${manCount}:0 (Solo Hombres)`;
+                } else {
+                    ratioText = "N/A";
+                }
+            } else {
+                 ratioText = "0:0";
+            }
+            
+            document.getElementById('manBar').style.width = `${manPercent}%`;
+            document.getElementById('womanBar').style.width = `${womanPercent}%`;
+            document.getElementById('genderRatio').textContent = ratioText;
+
+
+            // --- LISTA DE PERSONAS Y BOTONES ---
+            const peopleListElement = document.getElementById('peopleList');
+            peopleListElement.innerHTML = ''; 
+
+            peopleState.sort((a, b) => (a.isRemoving === b.isRemoving) ? 0 : a.isRemoving ? 1 : -1);
+
+            peopleState.forEach(state => {
                 const li = document.createElement('li');
-                const name = document.createElement('span');
-                name.className = 'font-semibold text-gray-700';
-                name.textContent = `${state.gender === 'man' ? 'Hombre' : 'Mujer'} ${statusText}`;
+                const nameSpan = document.createElement('span');
+                const statusSpan = document.createElement('span'); 
                 const removeButton = document.createElement('button');
-                removeButton.className = 'bg-red-500 hover:bg-red-600 text-white text-xs font-bold py-1 px-3 rounded-md transition duration-150 shadow-sm disabled:bg-gray-400';
-                const isDisabled = state.isRemoving || isGlobalRemovalActive;
-                removeButton.textContent = isDisabled ? (state.isRemoving ? 'Saliendo...' : 'En cola...') : 'Eliminar';
-                removeButton.disabled = isDisabled;
-                removeButton.onclick = () => removePerson(state.id);
+
+                nameSpan.textContent = state.name;
+                nameSpan.className = 'flex-1 truncate';
+
+                let className = 'flex items-center justify-between p-2 rounded-lg transition duration-150 ';
+                let buttonClass = 'ml-3 text-white font-bold py-1 px-3 rounded-md transition duration-150 shadow-sm disabled:bg-gray-400 disabled:opacity-50';
+
+                if (state.isInteracting) {
+                    statusSpan.textContent = " (Hablando)";
+                    statusSpan.className = 'text-green-400 font-semibold text-sm';
+                    nameSpan.appendChild(statusSpan);
+                }
+
+                if (state.isRemoving) {
+                    className += 'bg-danger-neon/20 border border-danger-neon text-danger-neon line-through italic';
+                    buttonClass += ' bg-gray-600 text-gray-300 cursor-not-allowed';
+                    removeButton.textContent = 'Saliendo...';
+                    removeButton.disabled = true;
+                } else {
+                    className += 'bg-gray-700 hover:bg-gray-600 border border-gray-600';
+                    buttonClass += ' bg-red-600 hover:bg-red-700';
+                    removeButton.textContent = 'Salir';
+                    removeButton.disabled = isGlobalRemovalActive;
+                    removeButton.onclick = () => removePerson(state.id);
+                }
+                
+                const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-4 h-4 mr-1"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/></svg>`;
+                
+                removeButton.innerHTML = svgIcon + removeButton.textContent;
+                removeButton.className = buttonClass + ' flex items-center';
+
                 li.className = className;
-                li.appendChild(name);
+                li.appendChild(nameSpan);
                 li.appendChild(removeButton);
                 peopleListElement.appendChild(li);
             });
-            countElement.textContent = currentCount;
+
+            if (peopleState.length === 0) {
+                 peopleListElement.innerHTML = '<li class="text-gray-400 text-sm italic">La lista está vacía.</li>';
+            }
+
             const clearButton = document.getElementById('clearAll');
+            const addManButton = document.getElementById('addMan');
+            const addWomanButton = document.getElementById('addWoman');
+
             if (clearButton) {
                  clearButton.disabled = isGlobalRemovalActive || currentCount === 0;
                  clearButton.textContent = isGlobalRemovalActive ? 'Limpiando...' : 'Limpiar Todo';
-                 if (currentCount === 0 && isGlobalRemovalActive) {
-                    isGlobalRemovalActive = false;
-                    clearButton.textContent = 'Limpiar Todo';
-                    clearButton.disabled = false;
-                 }
+                 const svgIcon = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="w-6 h-6 mr-2"><path d="M13 3h-2a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h2"/><path d="M15 17.5V17a2 2 0 0 0-2-2H9a2 2 0 0 0-2 2v.5"/><path d="M9 15V9h6v6"/></svg>`;
+                 clearButton.innerHTML = svgIcon + clearButton.textContent;
             }
-            document.getElementById('addMan').disabled = isGlobalRemovalActive;
-            document.getElementById('addWoman').disabled = isGlobalRemovalActive;
+            
+            addManButton.disabled = isGlobalRemovalActive || currentCount >= maxCapacity;
+            addWomanButton.disabled = isGlobalRemovalActive || currentCount >= maxCapacity;
+
+            const maxCapacityReached = currentCount >= maxCapacity;
+            
+            addManButton.classList.toggle('bg-gray-600', maxCapacityReached);
+            addManButton.classList.toggle('bg-male-color', !maxCapacityReached);
+
+            addWomanButton.classList.toggle('bg-gray-600', maxCapacityReached);
+            addWomanButton.classList.toggle('bg-secondary-neon', !maxCapacityReached);
         }
 
+        function showModal(title, message, type) {
+            console.warn(`[${type.toUpperCase()}] ${title}: ${message}`);
+            
+            const existingModal = document.getElementById('customModal');
+            if (existingModal) existingModal.remove();
+
+            const bgColor = type === 'danger' ? 'bg-red-600' : 'bg-primary-neon';
+
+            const modalHtml = `
+                <div id="customModal" class="fixed inset-0 bg-black bg-opacity-75 z-50 flex items-center justify-center p-4">
+                    <div class="bg-gray-800 p-6 rounded-xl shadow-2xl max-w-sm w-full border-t-4 ${bgColor} transition duration-300 transform scale-100">
+                        <h3 class="text-2xl font-bold mb-3 text-white">${title}</h3>
+                        <p class="text-gray-300 mb-6">${message}</p>
+                        <button onclick="document.getElementById('customModal').remove()" class="w-full ${bgColor} hover:bg-opacity-80 text-white font-bold py-2 px-4 rounded-lg transition duration-200">
+                            Entendido
+                        </button>
+                    </div>
+                </div>
+            `;
+            document.body.insertAdjacentHTML('beforeend', modalHtml);
+        }
+
+        // Initialize on load
         window.onload = function () {
             init();
+            updateUI(); 
+            document.getElementById('maxCapacity').value = maxCapacity;
         }
+
     </script>
 </body>
 </html>
